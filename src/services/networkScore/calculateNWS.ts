@@ -1,3 +1,11 @@
+import {
+  PlaidBalanceResponse,
+  PlaidInvestmentResponse,
+  PlaidIdentityMatch,
+  PlaidAccount,
+  PlaidHolding,
+  UserFinancialData,
+} from "../../types/plaid";
 /**
  * Network Worth Score (NWS) Calculator
  * 
@@ -16,11 +24,10 @@
 // ── Types ──
 
 export interface NWSInput {
-  balanceData: any | null;       // Plaid balance response
-  investmentsData: any | null;   // Plaid investments holdings
-  identityMatchData: any | null; // Plaid identity match scores
+  balanceData: PlaidBalanceResponse | null;
+  investmentsData: PlaidInvestmentResponse | null;
+  identityMatchData: PlaidIdentityMatch | null;
 }
-
 export interface NWSResult {
   score: number;           // 0–100 total
   breakdown: NWSBreakdown;
@@ -44,7 +51,7 @@ const clamp = (val: number, min: number, max: number) =>
   Math.max(min, Math.min(max, val));
 
 /** Safe parse number from any value */
-const toNum = (val: any): number => {
+const toNum = (val: unknown): number => {
   if (val === null || val === undefined) return 0;
   const n = Number(val);
   return isNaN(n) ? 0 : n;
@@ -82,16 +89,22 @@ const getLabel = (score: number): string => {
  * 
  * Scale: $0 → 0pts, $10K → 10pts, $50K → 15pts, $200K+ → 20pts
  */
-function calcLiquidityScore(balanceData: any): number {
+function calcLiquidityScore(balanceData: PlaidBalanceResponse | null): number {
   if (!balanceData?.accounts) return 0;
 
-  const liquidAccounts = balanceData.accounts.filter((a: any) =>
-    ['checking', 'savings', 'money market', 'hsa', 'cd'].includes(a.subtype?.toLowerCase())
-  );
+  const liquidAccounts = balanceData.accounts.filter(
+  (a: PlaidAccount) =>
+    ['checking', 'savings', 'money market', 'hisa', 'cd'].includes(
+      (a.subtype ?? '').toLowerCase()
+    )
+);
 
-  const totalLiquid = liquidAccounts.reduce((sum: number, a: any) => {
-    return sum + toNum(a.balances?.current || a.balances?.available || 0);
-  }, 0);
+const totalLiquid = liquidAccounts.reduce(
+  (sum: number, a: PlaidAccount) => {
+    return sum + toNum(a.balances?.current ?? a.balances?.available ?? 0);
+  },
+  0
+);
 
   // Logarithmic scale: diminishing returns past $50K
   if (totalLiquid <= 0) return 0;
@@ -110,7 +123,7 @@ function calcLiquidityScore(balanceData: any): number {
  * 
  * Scale: $0 → 0pts, $50K → 10pts, $250K → 18pts, $1M+ → 25pts
  */
-function calcInvestmentScore(investmentsData: any): number {
+function calcInvestmentScore(investmentsData: PlaidInvestmentResponse | null): number {
   if (!investmentsData) return 0;
 
   // Try holdings first, then accounts
@@ -144,12 +157,15 @@ function calcInvestmentScore(investmentsData: any): number {
  * Asset Depth (0–20 pts)
  * Based on total across ALL account types (liquid + investments + credit limits).
  */
-function calcAssetDepthScore(balanceData: any, investmentsData: any): number {
+function calcAssetDepthScore(
+  balanceData: PlaidBalanceResponse | null,
+  investmentsData: PlaidInvestmentResponse | null
+): number {
   let totalAssets = 0;
 
   // Sum all balance accounts
   if (balanceData?.accounts) {
-    totalAssets += balanceData.accounts.reduce((sum: number, a: any) => {
+    totalAssets += balanceData.accounts.reduce((sum: number, a: PlaidAccount) => {
       const current = toNum(a.balances?.current || 0);
       // For credit cards, available credit shows capacity (not debt)
       if (a.type === 'credit') {
@@ -159,10 +175,13 @@ function calcAssetDepthScore(balanceData: any, investmentsData: any): number {
     }, 0);
   }
 
-  // Add investment value
   if (investmentsData?.holdings) {
-    totalAssets += investmentsData.holdings.reduce((sum: number, h: any) =>
-      sum + toNum(h.institution_value || 0), 0);
+   totalAssets += investmentsData.holdings.reduce(
+  (sum: number, h: PlaidHolding) => {
+    return sum + toNum(h.institution_value || 0);
+  },
+  0
+);
   }
 
   if (totalAssets <= 0) return 0;
@@ -324,7 +343,9 @@ export function calculateNWS(input: NWSInput): NWSResult {
  * Calculate NWS from raw Supabase user_financial_data row.
  * Convenience wrapper that extracts the right fields.
  */
-export function calculateNWSFromDB(financialRow: any): NWSResult {
+export function calculateNWSFromDB(
+  financialRow: UserFinancialData | null
+): NWSResult {
   if (!financialRow) {
     return {
       score: 0,
