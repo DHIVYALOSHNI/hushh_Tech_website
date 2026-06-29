@@ -94,14 +94,16 @@ function calcLiquidityScore(balanceData: PlaidBalanceResponse | null): number {
 
   const liquidAccounts = balanceData.accounts.filter(
   (a: PlaidAccount) =>
-    ['checking', 'savings', 'money market', 'hisa', 'cd'].includes(
+    ['checking', 'savings', 'money market', 'hsa', 'cd'].includes(
       (a.subtype ?? '').toLowerCase()
     )
 );
 
 const totalLiquid = liquidAccounts.reduce(
   (sum: number, a: PlaidAccount) => {
-    return sum + toNum(a.balances?.current ?? a.balances?.available ?? 0);
+   return sum + toNum(
+  a.balances?.current || a.balances?.available || 0
+);
   },
   0
 );
